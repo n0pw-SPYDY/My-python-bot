@@ -8,24 +8,21 @@ from datetime import datetime, timedelta
 import time
 from urllib.parse import urlencode
 
-print("🚀 STARTING BOT...")
+print(" STARTING BOT...")
 
 # Load config safely from Environment Variables (Render)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-MAIN_SERVER = 1437381878310109185  # Your main server ID
+MAIN_SERVER = 1437381878310109185 
 
 if not BOT_TOKEN or not CLIENT_ID or not CLIENT_SECRET:
-    print("❌ ERROR: Missing BOT_TOKEN, CLIENT_ID, or CLIENT_SECRET in Environment Variables!")
+    print("❌ ERROR: Missing secrets in Environment Variables!")
     exit(1)
 
-print(f"✅ Config loaded from Environment")
-print(f"🆔 Client ID: {CLIENT_ID}")
-print(f"🏠 Main Server: {MAIN_SERVER}")
+print(f"✅ Config loaded | Client ID: {CLIENT_ID}")
 
 # --- ROLE LIMIT CONFIGURATION ---
-# Format: { ROLE_ID: MAX_JOINS_PER_COMMAND }
 ROLE_JOIN_LIMITS = {
     1553338998003466241: 5,    # Free Role (5 members)
     1553706783208636626: 7,    # Bronze Role (7 members)
@@ -37,547 +34,346 @@ ROLE_JOIN_LIMITS = {
     1553708334543151114: 160   # Ruby Role (160 members)
 }
 
-# Helper functions to track joins
 def load_limits():
     if os.path.exists('limits.json'):
-        with open('limits.json', 'r') as f:
-            return json.load(f)
+        with open('limits.json', 'r') as f: return json.load(f)
     return {}
 
-def save_limits(limits_data):
-    with open('limits.json', 'w') as f:
-        json.dump(limits_data, f, indent=4)
+def save_limits(data):
+    with open('limits.json', 'w') as f: json.dump(data, f, indent=4)
 
-# Create bot
+# Create bot with ALL required intents for mod/tickets/reactions
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True  # Added for better member handling
+intents.members = True
+intents.reactions = True
 
 bot = commands.Bot(command_prefix=['!', '?'], intents=intents)
 bot.remove_command("help")
 
-# Store server join times
 server_join_times = {}
 
 @bot.event
 async def on_ready():
-    print(f' Bot is ready: {bot.user}')
-    
-    # SYNC SLASH COMMANDS (Crucial for hybrid commands to work)
+    print(f'🎯 Bot is ready: {bot.user}')
     await bot.tree.sync()
-    print(f'📋 Synced commands: {[command.name for command in bot.commands]}')
     
-    # Initialize server join times
     for guild in bot.guilds:
         if guild.id != MAIN_SERVER:
             server_join_times[guild.id] = datetime.now()
-            print(f"📝 Tracking server: {guild.name} ({guild.id})")
     
-    # Start the cleanup task
     check_server_ages.start()
 
-@tasks.loop(hours=24)  # Run once per day
+@tasks.loop(hours=24)
 async def check_server_ages():
-    """Check servers and leave if they're older than 14 days (except main server)"""
-    print("🔍 Checking server ages...")
-    
     for guild in bot.guilds:
-        if guild.id == MAIN_SERVER:
-            continue  # Never leave main server
+        if guild.id == MAIN_SERVER: continue
+        gid, gname = guild.id, guild.name
+        age = None
         
-        guild_id = guild.id
-        guild_name = guild.name
-        guild_age = None
-        
-        # Calculate age
-        if guild_id in server_join_times:
-            join_time = server_join_times[guild_id]
-            guild_age = datetime.now() - join_time
+        if gid in server_join_times:
+            age = datetime.now() - server_join_times[gid]
         else:
-            # If we don't have a join time, assume we joined now
-            server_join_times[guild_id] = datetime.now()
-            guild_age = timedelta(0)
-        
-        if guild_age >= timedelta(days=14):
+            server_join_times[gid] = datetime.now()
+            age = timedelta(0)
+            
+        if age >= timedelta(days=14):
             try:
-                print(f"🚪 Leaving server {guild_name} ({guild_id}) - Age: {guild_age.days} days")
+                print(f"🚪 Leaving {gname} ({gid}) - Age: {age.days} days")
                 await guild.leave()
-                
-                # Send notification to main server
-                main_guild = bot.get_guild(MAIN_SERVER)
-                if main_guild:
-                    for channel in main_guild.text_channels:
-                        if channel.permissions_for(main_guild.me).send_messages:
-                            embed = discord.Embed(
+                mg = bot.get_guild(MAIN_SERVER)
+                if mg:
+                    for c in mg.text_channels:
+                        if c.permissions_for(mg.me).send_messages:
+                            await c.send(embed=discord.Embed(
                                 title="🚪 Bot Left Server",
-                                description=f"**Server:** {guild_name}\n**ID:** {guild_id}\n**Reason:** Server age ({guild_age.days} days) exceeded 14 days",
-                                color=0xED4245,
-                                timestamp=datetime.now()
-                            )
-                            await channel.send(embed=embed)
+                                description=f"**Server:** {gname}\n**ID:** {gid}\n**Reason:** Exceeded 14 days",
+                                color=0xED4245, timestamp=datetime.now()
+                            ))
                             break
-                
-                if guild_id in server_join_times:
-                    del server_join_times[guild_id]
-                    
-            except Exception as e:
-                print(f"❌ Error leaving server {guild_name}: {e}")
-        else:
-            print(f"✅ Server {guild_name} is {guild_age.days} days old - OK")
+                if gid in server_join_times: del server_join_times[gid]
+            except Exception as e: print(f"❌ Error leaving {gname}: {e}")
 
 @bot.event
 async def on_guild_join(guild):
-    """Track when bot joins a new server"""
     if guild.id != MAIN_SERVER:
         server_join_times[guild.id] = datetime.now()
-        print(f" Bot joined new server: {guild.name} ({guild.id})")
-        
-        main_guild = bot.get_guild(MAIN_SERVER)
-        if main_guild:
-            for channel in main_guild.text_channels:
-                if channel.permissions_for(main_guild.me).send_messages:
-                    embed = discord.Embed(
+        mg = bot.get_guild(MAIN_SERVER)
+        if mg:
+            for c in mg.text_channels:
+                if c.permissions_for(mg.me).send_messages:
+                    await c.send(embed=discord.Embed(
                         title="🏠 Bot Joined Server",
-                        description=f"**Server:** {guild.name}\n**ID:** {guild.id}\n**Members:** {guild.member_count}\n**Will leave after:** 14 days",
-                        color=0x57F287,
-                        timestamp=datetime.now()
-                    )
-                    await channel.send(embed=embed)
+                        description=f"**Server:** {guild.name}\n**ID:** {guild.id}\n**Members:** {guild.member_count}",
+                        color=0x57F287, timestamp=datetime.now()
+                    ))
                     break
 
 @bot.event
 async def on_guild_remove(guild):
-    """Remove server from tracking when bot leaves"""
-    if guild.id in server_join_times:
-        del server_join_times[guild.id]
-        print(f"🗑️ Removed tracking for server: {guild.name} ({guild.id})")
+    if guild.id in server_join_times: del server_join_times[guild.id]
 
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
-        await ctx.send(f"❌ Command not found. Use `!help` to see available commands.")
+        await ctx.send(f"❌ Command not found. Use `!help`")
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send(f"❌ You lack permissions: {error.missing_perms}")
     else:
         print(f"❌ Command error: {error}")
 
+# ================= AUTH & JOIN LOGIC =================
 def refresh_access_token(refresh_token):
-    """Refresh an expired access token"""
     try:
-        data = {
-            'client_id': CLIENT_ID,
-            'client_secret': CLIENT_SECRET,
-            'grant_type': 'refresh_token',
-            'refresh_token': refresh_token
-        }
-        
-        response = requests.post('https://discord.com/api/v10/oauth2/token', data=data)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            print(f"❌ Token refresh failed: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        print(f"❌ Token refresh error: {e}")
-        return None
+        resp = requests.post('https://discord.com/api/v10/oauth2/token', data={
+            'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
+            'grant_type': 'refresh_token', 'refresh_token': refresh_token
+        })
+        return resp.json() if resp.status_code == 200 else None
+    except: return None
 
-def get_valid_token(user_id, access_token, refresh_token):
-    """Get a valid access token, refreshing if needed"""
-    headers = {'Authorization': f'Bearer {access_token}'}
-    test_response = requests.get('https://discord.com/api/v10/users/@me', headers=headers)
-    
-    if test_response.status_code == 200:
-        return access_token  # Token is still valid
-    
-    print(f"🔄 Token expired for user {user_id}, refreshing...")
-    new_tokens = refresh_access_token(refresh_token)
-    
-    if new_tokens:
-        update_token_in_file(user_id, new_tokens['access_token'], new_tokens['refresh_token'])
-        return new_tokens['access_token']
-    else:
-        print(f"❌ Failed to refresh token for user {user_id}")
-        return None
+def get_valid_token(uid, access, refresh):
+    r = requests.get('https://discord.com/api/v10/users/@me', headers={'Authorization': f'Bearer {access}'})
+    if r.status_code == 200: return access
+    new = refresh_access_token(refresh)
+    if new:
+        update_token_in_file(uid, new['access_token'], new['refresh_token'])
+        return new['access_token']
+    return None
 
-def update_token_in_file(user_id, new_access_token, new_refresh_token):
-    """Update tokens in auths.txt file"""
-    try:
-        if not os.path.exists('auths.txt'):
-            return False
-        
-        with open('auths.txt', 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        
-        updated = False
-        new_lines = []
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            parts = line.split(',')
-            if len(parts) >= 3 and parts[0] == user_id:
-                new_line = f"{user_id},{new_access_token},{new_refresh_token}\n"
-                new_lines.append(new_line)
-                updated = True
-                print(f"✅ Updated tokens for user {user_id}")
-            else:
-                new_lines.append(line + '\n')
-        
-        if updated:
-            with open('auths.txt', 'w', encoding='utf-8') as f:
-                f.writelines(new_lines)
-            return True
-        
-        return False
-    except Exception as e:
-        print(f"❌ Error updating tokens in file: {e}")
-        return False
+def update_token_in_file(uid, new_acc, new_ref):
+    if not os.path.exists('auths.txt'): return False
+    with open('auths.txt', 'r', encoding='utf-8') as f: lines = f.readlines()
+    updated, new_lines = False, []
+    for line in lines:
+        line = line.strip()
+        if not line: continue
+        parts = line.split(',')
+        if len(parts) >= 3 and parts[0] == uid:
+            new_lines.append(f"{uid},{new_acc},{new_ref}\n")
+            updated = True
+        else: new_lines.append(line + '\n')
+    if updated:
+        with open('auths.txt', 'w', encoding='utf-8') as f: f.writelines(new_lines)
+    return updated
 
 @bot.hybrid_command(name='get_token')
 async def get_auth_token(ctx):
-    """Get authentication link"""
-    try:
-        redirect_url = "https://memberswave.netlify.app"
-        scopes = "identify guilds.join"
-        
-        auth_params = {
-            'client_id': CLIENT_ID,
-            'response_type': 'code',
-            'redirect_uri': redirect_url,
-            'scope': scopes,
-            'prompt': 'consent'
-        }
-        
-        oauth_url = f"https://discord.com/oauth2/authorize?{urlencode(auth_params)}"
-        
-        embed = discord.Embed(
-            title="🔐 Authentication Required",
-            description="**Click the link below to get your authentication code:**",
-            color=0x5865F2
-        )
-        embed.add_field(name="🚨 IMPORTANT", value="**Codes expire in 10 minutes!** Complete authentication quickly.", inline=False)
-        embed.add_field(name="🔗 Auth Link", value=f"[**👉 CLICK HERE TO AUTHENTICATE 👈**]({oauth_url})", inline=False)
-        embed.add_field(name=" Steps:", value="1. Click the link above\n2. Authorize the application\n3. **IMMEDIATELY** copy the code\n4. Use `!auth YOUR_CODE_HERE`", inline=False)
-        
-        await ctx.send(embed=embed)
-        print(f"✅ Sent auth link to {ctx.author.name}")
-        
-    except Exception as e:
-        await ctx.send(f"❌ Error generating auth link: {str(e)}")
-        print(f"❌ Error in get_token: {e}")
+    redirect_url = "https://memberswave.netlify.app"
+    oauth_url = f"https://discord.com/oauth2/authorize?{urlencode({
+        'client_id': CLIENT_ID, 'response_type': 'code',
+        'redirect_uri': redirect_url, 'scope': 'identify guilds.join', 'prompt': 'consent'
+    })}"
+    await ctx.send(embed=discord.Embed(title="🔐 Authentication Required", 
+        description="**Click below to authenticate:**", color=0x5865F2
+    ).add_field(name="🔗 Link", value=f"[**CLICK HERE**]({oauth_url})", inline=False))
 
 @bot.hybrid_command(name='auth')
 async def authenticate_user(ctx, authorization_code: str):
-    """Authenticate user with code"""
-    try:
-        authorization_code = authorization_code.strip()
-        current_user_id = str(ctx.author.id)
-        
-        print(f"🔐 PROCESSING CODE for user {current_user_id}")
-        msg = await ctx.send("🔄 Starting authentication...")
-        
-        token_data = {
-            'client_id': CLIENT_ID,
-            'client_secret': CLIENT_SECRET,
-            'grant_type': 'authorization_code', 
-            'code': authorization_code,
-            'redirect_uri': "https://memberswave.netlify.app"
-        }
-        
-        await msg.edit(content="🔄 Exchanging code for token...")
-        token_response = requests.post('https://discord.com/api/v10/oauth2/token', data=token_data)
-        
-        if token_response.status_code != 200:
-            error_info = token_response.json()
-            await msg.edit(content=f" Token exchange failed: {error_info.get('error_description', 'Unknown error')}")
-            return
-        
-        token_info = token_response.json()
-        access_token = token_info['access_token']
-        refresh_token = token_info['refresh_token']
-        
-        username = ctx.author.name
-        auth_entry = f"{current_user_id},{access_token},{refresh_token}\n"
-        
-        existing_entries = []
-        if os.path.exists('auths.txt'):
-            try:
-                with open('auths.txt', 'r', encoding='utf-8') as auth_file:
-                    existing_entries = auth_file.readlines()
-            except Exception as e:
-                existing_entries = []
-        
-        cleaned_entries = []
-        for line in existing_entries:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split(',')
-            if len(parts) >= 1 and parts[0] == current_user_id:
-                continue
-            cleaned_entries.append(line + '\n')
-        
-        cleaned_entries.append(auth_entry)
-        
-        try:
-            with open('auths.txt', 'w', encoding='utf-8') as auth_file:
-                auth_file.writelines(cleaned_entries)
-        except Exception as e:
-            await ctx.send(f" Error saving authentication: {e}")
-            return
-        
-        success_embed = discord.Embed(
-            title="✅ AUTHENTICATION SUCCESSFUL!",
-            description=f"**{username}** is now authenticated!",
-            color=0x57F287
-        )
-        success_embed.add_field(name="User ID", value=f"`{current_user_id}`", inline=True)
-        success_embed.add_field(name="Next Step", value="You will be added to servers when admin uses `!djoin SERVER_ID`", inline=False)
-        
-        await msg.edit(content="", embed=success_embed)
-        
-    except Exception as error:
-        await ctx.send(f" Error: {str(error)}")
-        print(f"❌ Exception: {error}")
-        
+    msg = await ctx.send("🔄 Authenticating...")
+    token_resp = requests.post('https://discord.com/api/v10/oauth2/token', data={
+        'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
+        'grant_type': 'authorization_code', 'code': authorization_code.strip(),
+        'redirect_uri': "https://memberswave.netlify.app"
+    })
+    if token_resp.status_code != 200:
+        await msg.edit(content=f"❌ Failed: {token_resp.json().get('error_description')}"); return
+    
+    t = token_resp.json()
+    uid = str(ctx.author.id)
+    entry = f"{uid},{t['access_token']},{t['refresh_token']}\n"
+    
+    existing = []
+    if os.path.exists('auths.txt'):
+        with open('auths.txt', 'r', encoding='utf-8') as f: existing = f.readlines()
+    
+    cleaned = [l+'\n' for l in existing if l.strip() and l.strip().split(',')[0] != uid]
+    cleaned.append(entry)
+    
+    with open('auths.txt', 'w', encoding='utf-8') as f: f.writelines(cleaned)
+    await msg.edit(content="", embed=discord.Embed(title="✅ Authenticated!", 
+        description=f"**{ctx.author.name}** is now ready!", color=0x57F287))
+
 @bot.hybrid_command(name='djoin')
 async def join_server(ctx, target_server_id: str):
-    """Add authenticated users to a server (Role & Limit Restricted)"""
+    tg = bot.get_guild(int(target_server_id))
+    if not tg: 
+        await ctx.send(f"❌ Bot not in `{target_server_id}`"); return
+    if not os.path.exists('auths.txt'):
+        await ctx.send("❌ No authenticated users."); return
+    
+    limits = load_limits()
+    mg = bot.get_guild(MAIN_SERVER)
+    if not mg: await ctx.send("❌ Main server not found!"); return
+    
+    users = []
+    with open('auths.txt', 'r') as f:
+        for line in f:
+            p = line.strip().split(',')
+            if len(p)>=3: users.append({'user_id':p[0],'access_token':p[1],'refresh_token':p[2]})
+    
+    if not users: await ctx.send("❌ No valid users."); return
+    
+    status = await ctx.send(f" Processing {len(users)} users...")
+    ok, fail, skip_role, skip_lim = 0, 0, 0, 0
+    
+    for i, u in enumerate(users):
+        if i%5==0: 
+            await status.edit(content=f"🚀 {i+1}/{len(users)} | ✅{ok} ❌{fail} ⏭️{skip_role+skip_lim}")
+        
+        member = mg.get_member(int(u['user_id']))
+        if not member: skip_role+=1; continue
+        
+        allowed = 0
+        for rid, lim in ROLE_JOIN_LIMITS.items():
+            if member.get_role(rid): allowed=lim; break
+        if allowed == 0: skip_role+=1; continue
+        
+        cur = limits.get(u['user_id'], 0)
+        if cur >= allowed: skip_lim+=1; continue
+        
+        vt = get_valid_token(u['user_id'], u['access_token'], u['refresh_token'])
+        if not vt: fail+=1; continue
+        
+        r = requests.put(f"https://discord.com/api/v10/guilds/{target_server_id}/members/{u['user_id']}",
+            headers={"Authorization": f"Bot {BOT_TOKEN}", "Content-Type": "application/json"},
+            json={"access_token": vt})
+        
+        if r.status_code in (201,204):
+            ok += 1; limits[u['user_id']] = cur + 1
+        else: fail += 1
+        await asyncio.sleep(1)
+    
+    save_limits(limits)
+    await status.edit(content="", embed=discord.Embed(title="🎯 Mass Join Done",
+        description=f"**Server:** {tg.name}\n✅ {ok} | ❌ {fail} | ⏭️ {skip_role+skip_lim}",
+        color=0x57F287 if ok>0 else 0xED4245))
+
+# ================= MODERATION COMMANDS =================
+@bot.hybrid_command(name='kick')
+@commands.has_permissions(kick_members=True)
+async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
+    await member.kick(reason=reason)
+    await ctx.send(embed=discord.Embed(title="👢 Kicked", 
+        description=f"**{member}** was kicked.\n**Reason:** {reason}", color=0xED4245))
+
+@bot.hybrid_command(name='ban')
+@commands.has_permissions(ban_members=True)
+async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
+    await member.ban(reason=reason)
+    await ctx.send(embed=discord.Embed(title="🔨 Banned", 
+        description=f"**{member}** was banned.\n**Reason:** {reason}", color=0xED4245))
+
+@bot.hybrid_command(name='timeout')
+@commands.has_permissions(moderate_members=True)
+async def timeout(ctx, member: discord.Member, minutes: int, *, reason="No reason provided"):
+    until = datetime.utcnow() + timedelta(minutes=minutes)
+    await member.timeout(until, reason=reason)
+    await ctx.send(embed=discord.Embed(title=" Timed Out", 
+        description=f"**{member}** timed out for {minutes} mins.\n**Reason:** {reason}", color=0xF1C40F))
+
+@bot.hybrid_command(name='purge')
+@commands.has_permissions(manage_messages=True)
+async def purge(ctx, amount: int):
+    deleted = await ctx.channel.purge(limit=amount+1)
+    await ctx.send(f"🧹 Deleted {len(deleted)-1} messages.", delete_after=5)
+
+@bot.hybrid_command(name='embed')
+@commands.has_permissions(manage_messages=True)
+async def send_embed(ctx, title: str, description: str, color: str = "5865F2"):
+    hex_color = int(color.replace("#",""), 16) if color.startswith("#") else int(color, 16)
+    await ctx.send(embed=discord.Embed(title=title, description=description, color=hex_color))
+
+# ================= REACTION ROLES =================
+reaction_roles = {}
+
+@bot.hybrid_command(name='rr_create')
+@commands.has_permissions(manage_roles=True)
+async def rr_create(ctx, message_id: int, emoji: str, role: discord.Role):
     try:
-        # 1. Check if bot is in target server
-        target_guild = bot.get_guild(int(target_server_id))
-        if not target_guild:
-            await ctx.send(f"❌ Bot is not in server `{target_server_id}`. Invite it first!")
-            return
-        
-        if not os.path.exists('auths.txt'):
-            await ctx.send("❌ No users are authenticated yet.")
-            return
-        
-        # 2. Load limits and main guild
-        limits = load_limits()
-        main_guild = bot.get_guild(MAIN_SERVER)
-        if not main_guild:
-            await ctx.send("❌ Bot cannot find the main server!")
-            return
+        msg = await ctx.fetch_message(message_id)
+        await msg.add_reaction(emoji)
+        reaction_roles[(msg.id, emoji)] = role.id
+        with open('reaction_roles.json', 'w') as f: json.dump(reaction_roles, f)
+        await ctx.send(f"✅ Reaction role set: {emoji} → {role.mention}")
+    except Exception as e: await ctx.send(f"❌ Error: {e}")
 
-        authenticated_users = []
-        with open('auths.txt', 'r') as auth_file:
-            for line in auth_file:
-                line = line.strip()
-                if not line: continue
-                parts = line.split(',')
-                if len(parts) >= 3:
-                    authenticated_users.append({
-                        'user_id': parts[0], 'access_token': parts[1], 'refresh_token': parts[2]
-                    })
-        
-        if not authenticated_users:
-            await ctx.send("❌ No valid authenticated users found.")
-            return
-        
-        total_users = len(authenticated_users)
-        status_msg = await ctx.send(f" **MASS JOIN STARTED**\nChecking roles and limits for {total_users} users...")
-        
-        success_count = 0
-        failed_count = 0
-        skipped_limit = 0
-        skipped_role = 0
-        
-        # 3. Process each user
-        for index, user_data in enumerate(authenticated_users):
-            user_id = user_data['user_id']
-            access_token = user_data['access_token']
-            refresh_token = user_data['refresh_token']
-            
-            # UPDATE STATUS
-            if index % 5 == 0:
-                await status_msg.edit(content=f"🚀 **PROCESSING** {index+1}/{total_users}...\n✅ Joined: {success_count} | ❌ Failed: {failed_count} | ️ Skipped: {skipped_limit + skipped_role}")
-            
-            try:
-                # CHECK ROLE AND LIMIT
-                member = main_guild.get_member(int(user_id))
-                if not member:
-                    skipped_role += 1
-                    continue
-                
-                allowed_joins = 0
-                for role_id, limit in ROLE_JOIN_LIMITS.items():
-                    if member.get_role(role_id):
-                        allowed_joins = limit
-                        break
-                
-                if allowed_joins == 0:
-                    skipped_role += 1 # User doesn't have the required role
-                    continue
-                
-                current_joins = limits.get(user_id, 0)
-                if current_joins >= allowed_joins:
-                    skipped_limit += 1 # User hit their join limit
-                    continue
+@bot.event
+async def on_raw_reaction_add(payload):
+    key = (payload.message_id, str(payload.emoji))
+    if key in reaction_roles:
+        guild = bot.get_guild(payload.guild_id)
+        if guild:
+            role = guild.get_role(reaction_roles[key])
+            if role: await payload.member.add_roles(role)
 
-                # GET VALID TOKEN
-                valid_token = get_valid_token(user_id, access_token, refresh_token)
-                if not valid_token:
-                    failed_count += 1
-                    continue
-                
-                # EXECUTE JOIN
-                api_url = f"https://discord.com/api/v10/guilds/{target_server_id}/members/{user_id}"
-                join_data = {"access_token": valid_token}
-                headers = {"Authorization": f"Bot {BOT_TOKEN}", "Content-Type": "application/json"}
-                
-                response = requests.put(api_url, headers=headers, json=join_data)
-                
-                if response.status_code in (201, 204):
-                    success_count += 1
-                    # UPDATE LIMIT TRACKER
-                    limits[user_id] = current_joins + 1
-                else:
-                    failed_count += 1
-                
-                await asyncio.sleep(1) # Rate limit safety
-                
-            except Exception as e:
-                failed_count += 1
-        
-        # Save updated limits
-        save_limits(limits)
-        
-        # 4. Final Results
-        final_embed = discord.Embed(
-            title="🎯 MASS JOIN COMPLETED",
-            description=f"**Server:** {target_guild.name}",
-            color=0x57F287 if success_count > 0 else 0xED4245
-        )
-        final_embed.add_field(name="✅ Successfully Joined", value=success_count, inline=True)
-        final_embed.add_field(name="❌ Failed", value=failed_count, inline=True)
-        final_embed.add_field(name="⏭️ Skipped (Role/Limit)", value=skipped_role + skipped_limit, inline=True)
-        
-        await status_msg.edit(content="", embed=final_embed)
-        
-    except Exception as error:
-        await ctx.send(f"❌ Mass join error: {str(error)}")
+@bot.event
+async def on_raw_reaction_remove(payload):
+    key = (payload.message_id, str(payload.emoji))
+    if key in reaction_roles:
+        guild = bot.get_guild(payload.guild_id)
+        if guild:
+            member = guild.get_member(payload.user_id)
+            role = guild.get_role(reaction_roles[key])
+            if member and role: await member.remove_roles(role)
 
-@bot.hybrid_command(name='check_tokens')
-async def check_token_validity(ctx):
-    """Check which tokens are still valid"""
-    try:
-        if not os.path.exists('auths.txt'):
-            await ctx.send("❌ No users are authenticated yet.")
-            return
-        
-        users = []
-        valid_count = 0
-        expired_count = 0
-        
-        with open('auths.txt', 'r') as auth_file:
-            for line in auth_file:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split(',')
-                if len(parts) >= 2:
-                    user_id = parts[0]
-                    access_token = parts[1]
-                    
-                    headers = {'Authorization': f'Bearer {access_token}'}
-                    test_response = requests.get('https://discord.com/api/v10/users/@me', headers=headers)
-                    
-                    if test_response.status_code == 200:
-                        status = "✅ VALID"
-                        valid_count += 1
-                    else:
-                        status = "❌ EXPIRED"
-                        expired_count += 1
-                    
-                    users.append(f"{status} <@{user_id}>")
-        
-        embed = discord.Embed(title="🔍 TOKEN VALIDITY CHECK", description=f"**Valid:** {valid_count} | **Expired:** {expired_count}", color=0x5865F2)
-        if users:
-            embed.add_field(name="Token Status", value="\n".join(users[:15]), inline=False)
-        
-        await ctx.send(embed=embed)
-    except Exception as error:
-        await ctx.send(f"❌ Error checking tokens: {str(error)}")
+# Load reaction roles on startup
+if os.path.exists('reaction_roles.json'):
+    with open('reaction_roles.json', 'r') as f: reaction_roles = json.load(f)
 
-@bot.hybrid_command(name='list_users')
-async def list_authenticated_users(ctx):
-    """List all authenticated users"""
-    try:
-        if not os.path.exists('auths.txt'):
-            await ctx.send("❌ No users are authenticated yet.")
-            return
-        
-        users = []
-        with open('auths.txt', 'r') as auth_file:
-            for line_num, line in enumerate(auth_file, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split(',')
-                if len(parts) >= 1:
-                    user_id = parts[0]
-                    users.append(f"`{line_num}.` <@{user_id}>")
-        
-        if not users:
-            await ctx.send("❌ No valid authenticated users found.")
-            return
-        
-        embed = discord.Embed(title="📋 AUTHENTICATED USERS", description=f"**Total: {len(users)} users**", color=0x5865F2)
-        embed.add_field(name="Users", value="\n".join(users[:20]), inline=False)
-        await ctx.send(embed=embed)
-    except Exception as error:
-        await ctx.send(f"❌ Error listing users: {str(error)}")
+# ================= TICKET SYSTEM =================
+ticket_categories = {}
 
-@bot.hybrid_command(name='invite')
-async def generate_invite(ctx):
-    """Generate bot invite link"""
-    invite_url = f"https://discord.com/oauth2/authorize?client_id={CLIENT_ID}&permissions=8&scope=bot%20applications.commands"
-    embed = discord.Embed(title="🤖 BOT INVITE LINK", description="**Use this link to add the bot to any server:**", color=0x5865F2)
-    embed.add_field(name="🔗 Invite Link", value=f"[** CLICK HERE TO INVITE BOT 👈**]({invite_url})", inline=False)
-    await ctx.send(embed=embed)
+@bot.hybrid_command(name='ticket_setup')
+@commands.has_permissions(manage_channels=True)
+async def ticket_setup(ctx, category: discord.CategoryChannel):
+    ticket_categories[ctx.guild.id] = category.id
+    with open('tickets.json', 'w') as f: json.dump(ticket_categories, f)
+    await ctx.send(f"✅ Tickets will be created in **{category.name}**")
 
-@bot.hybrid_command(name='servers')
-async def list_servers(ctx):
-    """List all servers the bot is in"""
-    try:
-        if not bot.guilds:
-            await ctx.send("❌ Bot is not in any servers.")
-            return
-        
-        server_list = []
-        current_time = datetime.now()
-        
-        for guild in bot.guilds:
-            age_days = "Permanent" if guild.id == MAIN_SERVER else "Unknown"
-            if guild.id in server_join_times:
-                join_time = server_join_times[guild.id]
-                age = current_time - join_time
-                age_days = f"{age.days} days"
-            
-            server_list.append(f"`{guild.id}` - **{guild.name}** (Members: {guild.member_count}) - Age: {age_days}")
-        
-        embed = discord.Embed(title="🏠 BOT SERVERS", description=f"**Total: {len(bot.guilds)} servers**\n⭐ = Main Server (Never leaves)", color=0x5865F2)
-        embed.add_field(name="Servers", value="\n".join(server_list[:15]), inline=False)
-        await ctx.send(embed=embed)
-    except Exception as error:
-        await ctx.send(f"❌ Error listing servers: {str(error)}")
+@bot.hybrid_command(name='ticket')
+async def create_ticket(ctx):
+    cid = ticket_categories.get(ctx.guild.id)
+    if not cid:
+        await ctx.send("❌ Tickets not configured. Admin must run `!ticket_setup CATEGORY`"); return
+    
+    cat = ctx.guild.get_channel(cid)
+    overwrites = {
+        ctx.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        ctx.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)
+    }
+    channel = await cat.create_text_channel(f"ticket-{ctx.author.name}", overwrites=overwrites)
+    await channel.send(embed=discord.Embed(
+        title="🎫 Support Ticket",
+        description=f"Hello {ctx.author.mention}! Staff will be with you shortly.\nType `!close` to close this ticket.",
+        color=0x5865F2
+    ))
+    await ctx.send(f"✅ Ticket created: {channel.mention}", delete_after=5)
 
+@bot.hybrid_command(name='close')
+@commands.has_permissions(manage_channels=True)
+async def close_ticket(ctx):
+    if not ctx.channel.name.startswith("ticket-"):
+        await ctx.send("❌ This is not a ticket channel."); return
+    await ctx.channel.delete()
+
+# Load ticket categories on startup
+if os.path.exists('tickets.json'):
+    with open('tickets.json', 'r') as f: ticket_categories = json.load(f)
+
+# ================= HELP COMMAND =================
 @bot.hybrid_command(name='help')
 async def show_help(ctx):
-    """Show all available commands"""
-    embed = discord.Embed(title="🤖 BOT COMMANDS", color=0x5865F2)
-    
-    embed.add_field(name=" AUTH", value="`!get_token` - Get auth link\n`!auth CODE` - Authenticate", inline=False)
-    embed.add_field(name=" JOINING", value="`!djoin SERVER_ID` - Mass join (Role limited)\n`!servers` - List servers", inline=False)
-    embed.add_field(name="🛠️ UTIL", value="`!list_users` - List users\n`!check_tokens` - Check token health", inline=False)
-    
+    embed = discord.Embed(title="🤖 Full Bot Commands", color=0x5865F2)
+    embed.add_field(name="🔐 Auth & Join", value="`!get_token` `!auth CODE` `!djoin SERVER_ID`", inline=False)
+    embed.add_field(name="️ Moderation", value="`!kick` `!ban` `!timeout MIN` `!purge AMT` `!embed TITLE DESC COLOR`", inline=False)
+    embed.add_field(name="⭐ Reaction Roles", value="`!rr_create MSG_ID EMOJI @ROLE`", inline=False)
+    embed.add_field(name="🎫 Tickets", value="`!ticket_setup CAT` `!ticket` `!close`", inline=False)
+    embed.add_field(name="🔧 Utility", value="`!servers` `!list_users` `!check_tokens` `!invite`", inline=False)
     await ctx.send(embed=embed)
 
-# START BOT
 if __name__ == "__main__":
-    print("🎯 STARTING COMPLETE DISCORD BOT...")
-    try:
-        bot.run(BOT_TOKEN)
-    except Exception as e:
-        print(f"❌ Failed to start bot: {e}")
+    print(" Starting full-featured Discord bot...")
+    try: bot.run(BOT_TOKEN)
+    except Exception as e: print(f"❌ Failed: {e}")
