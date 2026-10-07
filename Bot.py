@@ -316,6 +316,22 @@ async def show_help(ctx):
     embed.add_field(name="🔐 Authentication", value="`!get_token` - Get auth link\n`!auth CODE` - Verify code\n`!check_my_token` - Check status", inline=False)
     embed.add_field(name="🚀 Mass Join", value="`!djoin SERVER_ID` - Add users to server\n`!list_users` - View authenticated users", inline=False)
     await ctx.send(embed=embed)
+import threading
+import time
+from aiohttp import web
+
+async def handle_ping(request):
+    return web.Response(text="OK")
+
+app = web.Application()
+app.router.add_get('/ping', handle_ping)
+
+def run_keepalive():
+    web.run_app(app, host='0.0.0.0', port=8080, print=None)
+
+# Start keep-alive in a separate thread so it doesn't block the bot
+threading.Thread(target=run_keepalive, daemon=True).start()
+print("🟢 Keep-alive endpoint running on :8080/ping")
 
 if __name__ == "__main__":
     print("🎯 Starting Mass Join Bot...")
